@@ -1,0 +1,6 @@
+streamlit
+crawl4ai
+pymilvus
+langchain-milvus
+langchain-community
+sentence-transformers>=2.2.0   # BGM-M3 via Huggingface
