@@ -15,7 +15,7 @@ import streamlit as st
 
 # Configuration
 INPUT_DIR = "data_scraped_txt"
-OUTPUT_DIR = "processed_data"
+OUTPUT_DIR = "upserted_data"
 BATCH_SIZE = 20  # Process documents in batches
 
 prepare_batch_upsert_source = []
@@ -97,11 +97,13 @@ def process_file(filepath: str) -> list:
 def upsert_batch(documents: list, metadatas: list, pinecone_manager):
     """Upsert a batch of documents to Pinecone"""
     if not documents:
+        print("⚠️ No documents to upsert in batch")
         return 0
     
     try:
+        print(f"🔄 Attempting to upsert {len(documents)} documents...")
         pinecone_manager.add_documents(documents, metadatas)
-        print(f"✅ Upserted batch of {len(documents)} documents")
+        print(f"✅ Successfully upserted {len(documents)} documents")
         return len(documents)
     except Exception as e:
         print(f"❌ Error upserting batch: {e}")
@@ -143,8 +145,7 @@ def batch_process_forums():
             api_key=st.secrets.get("PINECONE_API_KEY") or os.getenv("PINECONE_API_KEY"),
             cloud=st.secrets.get("PINECONE_ENVIRONMENT_CLOUD") or os.getenv("PINECONE_ENVIRONMENT_CLOUD") or "aws",
             region=st.secrets.get("PINECONE_ENVIRONMENT_REGION") or os.getenv("PINECONE_ENVIRONMENT_REGION"),
-            # index_name=st.secrets.get("PINECONE_INDEX_NAME") or os.getenv("PINECONE_INDEX_NAME") or "agnos-forums",
-            index_name="agnos-forum-firecrawl",
+            index_name=st.secrets.get("PINECONE_INDEX_NAME") or os.getenv("PINECONE_INDEX_NAME") or "agnos-forums",
             embedder=embedder,
             dimension=1024,
         )
@@ -162,22 +163,27 @@ def batch_process_forums():
         records = process_file(filepath)
         all_records.extend(records)
     
-    print(f"📊 Total records extracted: {len(all_records)}")
+    print(f"📊 Total records extracted: {len(all_records)}\n")
     
     # Process records in batches
     documents = []
     metadatas = []
     total_upserted = 0
     batch_count = 0
+    processed_records = 0
+    skipped_records = 0
+    error_records = 0
     
     for i, record in enumerate(all_records):
         # Skip records with too little content
         if record["word_count"] < 20:
+            skipped_records += 1
             continue
         
         # Skip records without forum URL
         if not record["forum_url"]:
             print(f"⚠️ Skipping record {i} - no forum URL found")
+            skipped_records += 1
             continue
         
         # Debug: Print the URL being processed
@@ -188,12 +194,15 @@ def batch_process_forums():
         print(f"✅ Cleaned URL: {clean_source}")
         
         # Skip if cleaning failed
-        if not clean_source:
-            print(f"⚠️ Skipping record {i} - URL cleaning failed")
+        if clean_source in ["prefix source forum url not found", "error when clean source forum url"]:
+            print(f"⚠️ Skipping record {i} - URL cleaning failed: {clean_source}")
+            skipped_records += 1
             continue
         
         if clean_source in prepare_batch_upsert_source:
             # if clean_source already in upserted source
+            print(f"** Skip record {i} - {clean_source} already in prepare batch")
+            skipped_records += 1
             continue
         
         # Create metadata
@@ -216,7 +225,7 @@ def batch_process_forums():
                 metadatas.append(chunk.metadata)
             
             prepare_batch_upsert_source.append(clean_source)
-            
+            processed_records += 1
             
             # Upsert batch if we have enough documents
             if len(documents) >= BATCH_SIZE:
@@ -224,12 +233,18 @@ def batch_process_forums():
                 print(f"🔄 Processing batch {batch_count} ({len(documents)} documents)")
                 upserted = upsert_batch(documents, metadatas, pinecone_manager)
                 
-                total_upserted += upserted
+                if upserted > 0:
+                    total_upserted += upserted
+                    print(f"✅ Successfully upserted {upserted} documents in batch {batch_count}")
+                else:
+                    print(f"⚠️ Batch {batch_count} failed to upsert")
+                
                 documents = []
                 metadatas = []
                 
         except Exception as e:
             print(f"❌ Error processing record {i}: {e}")
+            error_records += 1
             continue
     
     # Upsert remaining documents
@@ -237,7 +252,11 @@ def batch_process_forums():
         batch_count += 1
         print(f"🔄 Processing final batch {batch_count} ({len(documents)} documents)")
         upserted = upsert_batch(documents, metadatas, pinecone_manager)
-        total_upserted += upserted
+        if upserted > 0:
+            total_upserted += upserted
+            print(f"✅ Successfully upserted {upserted} documents in final batch")
+        else:
+            print(f"⚠️ Final batch failed to upsert")
     
     # Save summary
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -245,19 +264,39 @@ def batch_process_forums():
     
     summary = {
         "total_files": len(forum_files),
-        "total_records": len(all_records),
+        "total_records_extracted": len(all_records),
+        "processed_records": processed_records,
+        "skipped_records": skipped_records,
+        "error_records": error_records,
         "total_documents_upserted": total_upserted,
         "batches_processed": batch_count,
+        "unique_sources_processed": len(prepare_batch_upsert_source),
         "processed_at": datetime.now().isoformat(),
         "input_directory": INPUT_DIR,
-        "sample_records": all_records[:] if all_records else []
+        "batch_size": BATCH_SIZE,
+        "unique_sources": prepare_batch_upsert_source,  # First 10 sources
+        "sample_all_records": all_records[:15] if all_records else [],
     }
     
     with open(summary_file, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, ensure_ascii=False)
     
     print(f"📊 Summary saved to {summary_file}")
-    print(f"🎉 Batch processing completed! Upserted {total_upserted} documents in {batch_count} batches")
+    print(f"\n🎉 Batch processing completed!")
+    print(f"📈 Final Statistics:")
+    print(f"   • Total records extracted: {len(all_records)}")
+    print(f"   • Records processed: {processed_records}")
+    print(f"   • Records skipped: {skipped_records}")
+    print(f"   • Records with errors: {error_records}")
+    print(f"   • Documents upserted: {total_upserted}")
+    print(f"   • Batches processed: {batch_count}")
+    print(f"   • Unique sources: {len(prepare_batch_upsert_source)}")
+    
+    if total_upserted > 0:
+        print(f"✅ Successfully upserted {total_upserted} documents in {batch_count} batches")
+    else:
+        print(f"⚠️ No documents were successfully upserted")
+
 
 def main():
     """Main execution function"""
