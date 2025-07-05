@@ -263,7 +263,7 @@ def main():
                         # Add context to the system prompt if RAG is enabled and context is found
                         enhanced_system_prompt = system_prompt
                         if context:
-                            enhanced_system_prompt = f"{system_prompt}\n\n**Relevant Context from Medical Database:**\n{context}\n\nPlease use this context to provide accurate, evidence-based responses."
+                            enhanced_system_prompt = f"{system_prompt}\n\n**Relevant Context from Agnos Medical Database:**\n{context}\n\nPlease use this context to provide source url accurate, evidence-based responses."
                             if st.session_state.is_dev:
                                 st.sidebar.write(f"Debug: Enhanced system prompt with {len(context)} chars of context")
                         
