@@ -9,7 +9,7 @@ import torch
 from pinecone import Pinecone, ServerlessSpec
 
 def get_system_prompt():
-    return """You are a highly knowledgeable, professional medical assistant AI (Agnos Assistant), Your character is women. using Retrieval-Augmented Generation (RAG) based on Thailand.
+    return """You are a highly knowledgeable, professional medical assistant AI (AGNOS Assistant), Your character is women. using Retrieval-Augmented Generation (RAG) based on Thailand.
 
 When a user/patient asks a question or describes symptoms, perform the following:
 
@@ -24,16 +24,16 @@ When a user/patient asks a question or describes symptoms, perform the following
    "ควรติดต่อแพทย์หรือโทรหาฉุกเฉินทันที (call emergency services)."
 
 **Formatting:**
-- If the topic or technical is needed, Include **citations** like (Source forum url: [Title], [Year]) or numerical footnotes if the topic is needed.
-- If the topic or technical is needed, Briefly mention retrieval source (e.g., "ข้อมูลจาก Agnos Health, Bangkok Hospital, etc,...").
-- If the topic or technical is needed, reference and can't find any supporting documents found: say **"ไม่พบหลักฐานจากเอกสารที่ดึงมา"**.
+- Include **citations** like (Source: [Source Agnos forum url], [Title], [Year]) if the topic is needed.
+- If the topic or technical is needed, Briefly mention retrieval source (e.g., ข้อมูลจากแหล่งข้อมูลอ้างอิง <Source>) or Source URL.
+- If the topic or technical is needed, reference and can't find any supporting documents found: say **"ไม่พบเอกสารจากฐานข้อมูลที่ดึงมา"**.
 
 **Process Example:**
 User: "เจ็บคอและมีไข้มา 2 วัน"  
 Assistant:
   1. **แสดงความห่วงใยเล็กน้อย**
   2. **สรุปความกังวล**
-  3. แหล่งข้อมูลที่ดึงมาหากจำเป็น (เช่น Agnos Health, Bangkok Hospital, abstracts, ...)
+  3. แหล่งข้อมูลที่ดึงมาหากจำเป็น (เช่น Source)
   4. อธิบายความเป็นไปได้ สาเหตุ และคำแนะนำ 
   5. สรุปสั้นๆ
   6. ถามติดตามหรือให้คำแนะนำเพิ่มเติม
@@ -69,37 +69,66 @@ class TextEmbedder:
         
         # Initialize model with proper device handling
         try:
-            self.model = SentenceTransformerEmbeddings(
-                model_name=model_name, 
-                model_kwargs={
-                    "device": self.device,
-                    "trust_remote_code": True
-                },
-                encode_kwargs={
-                    "normalize_embeddings": True, 
-                    "convert_to_tensor": True,
-                    "device": self.device
-                }
-            )
+            # Use different initialization for CPU vs GPU
+            if self.device == "cpu":
+                self.model = SentenceTransformerEmbeddings(
+                    model_name=model_name, 
+                    model_kwargs={
+                        "device": "cpu",
+                        "trust_remote_code": True
+                    },
+                    encode_kwargs={
+                        "normalize_embeddings": True, 
+                        "convert_to_tensor": False,  # Don't convert to tensor on CPU
+                        "device": "cpu"
+                    }
+                )
+            else:
+                self.model = SentenceTransformerEmbeddings(
+                    model_name=model_name, 
+                    model_kwargs={
+                        "device": self.device,
+                        "trust_remote_code": True
+                    },
+                    encode_kwargs={
+                        "normalize_embeddings": True, 
+                        "convert_to_tensor": True,
+                        "device": self.device
+                    }
+                )
             print(f"Model {model_name} loaded successfully on {self.device}.")
         except Exception as e:
             print(f"Error loading model on {self.device}: {e}")
-            # Fallback to CPU
+            # Fallback to CPU with minimal settings
             self.device = "cpu"
             print(f"Falling back to CPU...")
-            self.model = SentenceTransformerEmbeddings(
-                model_name=model_name, 
-                model_kwargs={
-                    "device": "cpu",
-                    "trust_remote_code": True
-                },
-                encode_kwargs={
-                    "normalize_embeddings": True, 
-                    "convert_to_tensor": True,
-                    "device": "cpu"
-                }
-            )
-            print(f"Model {model_name} loaded successfully on CPU.")
+            try:
+                self.model = SentenceTransformerEmbeddings(
+                    model_name=model_name, 
+                    model_kwargs={
+                        "device": "cpu",
+                        "trust_remote_code": True
+                    },
+                    encode_kwargs={
+                        "normalize_embeddings": True, 
+                        "convert_to_tensor": False,  # Avoid tensor conversion on CPU
+                        "device": "cpu"
+                    }
+                )
+                print(f"Model {model_name} loaded successfully on CPU.")
+            except Exception as cpu_error:
+                print(f"Critical error loading model on CPU: {cpu_error}")
+                # Last resort: try without any device specification
+                self.model = SentenceTransformerEmbeddings(
+                    model_name=model_name, 
+                    model_kwargs={
+                        "trust_remote_code": True
+                    },
+                    encode_kwargs={
+                        "normalize_embeddings": True
+                    }
+                )
+                print(f"Model {model_name} loaded with default settings.")
 
     def _get_best_device(self):
         """Get the best available device for PyTorch"""
@@ -126,17 +155,58 @@ class TextEmbedder:
 
     def embed_text(self, text: str) -> list[float]:
         try:
-            return self.model.embed_query(text)
+            if not text or not text.strip():
+                print("Warning: Empty text provided for embedding")
+                return []
+            
+            result = self.model.embed_query(text)
+            if not result:
+                print("Warning: Empty embedding result")
+                return []
+            
+            return result
         except Exception as e:
             print(f"Error embedding text: {e}")
-            return []
+            # Try to provide a fallback embedding (zeros)
+            try:
+                # Get embedding dimension from model
+                if hasattr(self.model, 'client') and hasattr(self.model.client, 'get_sentence_embedding_dimension'):
+                    dim = self.model.client.get_sentence_embedding_dimension()
+                else:
+                    dim = 1024  # Default dimension for BGE-M3
+                return [0.0] * dim
+            except:
+                return []
         
     def embed_documents(self, documents: list[str]) -> list[list[float]]:
         try:
-            return self.model.embed_documents(documents)
+            if not documents:
+                print("Warning: Empty documents list provided for embedding")
+                return []
+            
+            # Filter out empty documents
+            valid_docs = [doc for doc in documents if doc and doc.strip()]
+            if not valid_docs:
+                print("Warning: No valid documents to embed")
+                return []
+            
+            result = self.model.embed_documents(valid_docs)
+            if not result:
+                print("Warning: Empty embedding results")
+                return []
+            
+            return result
         except Exception as e:
             print(f"Error embedding documents: {e}")
-            return []
+            # Try to provide fallback embeddings
+            try:
+                if hasattr(self.model, 'client') and hasattr(self.model.client, 'get_sentence_embedding_dimension'):
+                    dim = self.model.client.get_sentence_embedding_dimension()
+                else:
+                    dim = 1024
+                return [[0.0] * dim for _ in documents]
+            except:
+                return []
         
         
 class MilvusManager:
@@ -275,6 +345,8 @@ class PineconeManager:
                     print(f"Warning: Embedding dimension mismatch for doc {i}. Skipping.")
                     continue
                 meta = metadatas[i] if metadatas else {}
+                # Store content in metadata so we can retrieve it later
+                meta['content'] = doc
                 docs.append((str(uuid.uuid4()), embedding, meta))
             if docs:
                 self.index.upsert(vectors=docs)
@@ -291,7 +363,7 @@ class PineconeManager:
             if len(embedding) != self.vector_dimension:
                 print("Query embedding dimension mismatch.")
                 return []
-            results = self.index.query(vector=embedding, top_k=k, include_metadata=True)
+            results = self.index.query(vector=embedding, top_k=k, include_metadata=True, include_values=True)
             return results.matches
         except Exception as e:
             print(f"Error querying Pinecone: {e}")
