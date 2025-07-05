@@ -1,4 +1,5 @@
 # utils.py
+import uuid
 from langchain_community.embeddings import SentenceTransformerEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_milvus import Milvus
@@ -7,6 +8,7 @@ from pymilvus import MilvusClient
 import streamlit as st
 import os, re
 import torch
+from pinecone import Pinecone, ServerlessSpec
 
 def get_system_prompt():
     return """You are a highly knowledgeable, professional medical assistant AI using Retrieval-Augmented Generation (RAG).
@@ -179,4 +181,70 @@ class MilvusManager:
             
         except Exception as e:
             print(f"Error performing MMR search: {e}")
+            return []
+
+class PineconeManager:
+    def __init__(
+            self,
+            embedder: TextEmbedder = None,
+            api_key: str = None,
+            index_name: str = None,
+            dimension: int = 1024,
+            cloud: str = None,
+            region: str = None,
+        ):
+        self.embedder = embedder
+        self.api_key = api_key
+        self.index_name = index_name
+        self.cloud = cloud
+        self.region = region
+        self.vector_dimension = dimension
+        
+        if not all([self.api_key, self.index_name, self.region]):
+            raise ValueError("Pinecone API key, index name, and region must be set via env or secrets.")
+        self.pc = Pinecone(api_key=self.api_key)
+        # Create index if needed
+        if self.index_name not in self.pc.list_indexes().names():
+            if not self.region:
+                raise ValueError("Pinecone region must be specified via env, secrets, or argument.")
+            self.pc.create_index(
+                name=self.index_name,
+                dimension=self.vector_dimension,
+                metric="cosine",
+                spec=ServerlessSpec(cloud=self.cloud, region=self.region)
+            )
+        self.index = self.pc.Index(self.index_name)
+        print(f"PineconeManager initialized with index: {self.index_name}")
+
+
+    def add_documents(self, documents: list[str], metadatas: list[dict]) -> None:
+        try:
+            docs = []
+            for i, doc in enumerate(documents):
+                # Embed and check dimension
+                embedding = self.embedder.embed_text(doc)
+                if len(embedding) != self.vector_dimension:
+                    print(f"Warning: Embedding dimension mismatch for doc {i}. Skipping.")
+                    continue
+                meta = metadatas[i] if metadatas else {}
+                docs.append((str(uuid.uuid4()), embedding, meta))
+            if docs:
+                self.index.upsert(vectors=docs)
+                print(f"Upserted {len(docs)} documents to Pinecone index {self.index_name}.")
+            else:
+                print("No valid documents to upsert.")
+        except Exception as e:
+            print(f"Error adding documents to Pinecone: {e}")
+
+
+    def retrieve(self, query: str, k: int = 5) -> list[dict]:
+        try:
+            embedding = self.embedder.embed_text(query)
+            if len(embedding) != self.vector_dimension:
+                print("Query embedding dimension mismatch.")
+                return []
+            results = self.index.query(vector=embedding, top_k=k, include_metadata=True)
+            return results.matches
+        except Exception as e:
+            print(f"Error querying Pinecone: {e}")
             return []
