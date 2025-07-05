@@ -69,58 +69,26 @@ class TextEmbedder:
         
         # Initialize model with proper device handling
         try:
-            # Use different initialization for CPU vs GPU
-            if self.device == "cpu":
-                self.model = SentenceTransformerEmbeddings(
-                    model_name=model_name, 
-                    model_kwargs={
-                        "device": "cpu",
-                        "trust_remote_code": True
-                    },
-                    encode_kwargs={
-                        "normalize_embeddings": True, 
-                        "convert_to_tensor": False,  # Don't convert to tensor on CPU
-                        "device": "cpu"
-                    }
-                )
-            else:
-                self.model = SentenceTransformerEmbeddings(
-                    model_name=model_name, 
-                    model_kwargs={
-                        "device": self.device,
-                        "trust_remote_code": True
-                    },
-                    encode_kwargs={
-                        "normalize_embeddings": True, 
-                        "convert_to_tensor": True,
-                        "device": self.device
-                    }
-                )
-            print(f"Model {model_name} loaded successfully on {self.device}.")
+            # Use minimal settings to avoid meta tensor problems
+            self.model = SentenceTransformerEmbeddings(
+                model_name=model_name, 
+                model_kwargs={
+                    "trust_remote_code": True,
+                    "device": self.device,
+                },
+                encode_kwargs={
+                    "normalize_embeddings": True,
+                }
+            )
+            print(f"Model {model_name} loaded successfully on CPU.")
+            
         except Exception as e:
-            print(f"Error loading model on {self.device}: {e}")
-            # Fallback to CPU with minimal settings
-            self.device = "cpu"
-            print(f"Falling back to CPU...")
+            print(f"Error loading model: {e}")
+            # Last resort: try with even more minimal settings
             try:
+                print("Trying with minimal settings...")
                 self.model = SentenceTransformerEmbeddings(
-                    model_name=model_name, 
-                    model_kwargs={
-                        "device": "cpu",
-                        "trust_remote_code": True
-                    },
-                    encode_kwargs={
-                        "normalize_embeddings": True, 
-                        "convert_to_tensor": False,  # Avoid tensor conversion on CPU
-                        "device": "cpu"
-                    }
-                )
-                print(f"Model {model_name} loaded successfully on CPU.")
-            except Exception as cpu_error:
-                print(f"Critical error loading model on CPU: {cpu_error}")
-                # Last resort: try without any device specification
-                self.model = SentenceTransformerEmbeddings(
-                    model_name=model_name, 
+                    model_name=model_name,
                     model_kwargs={
                         "trust_remote_code": True
                     },
@@ -128,7 +96,10 @@ class TextEmbedder:
                         "normalize_embeddings": True
                     }
                 )
-                print(f"Model {model_name} loaded with default settings.")
+                print(f"Model {model_name} loaded with minimal settings.")
+            except Exception as final_error:
+                print(f"Critical error loading model: {final_error}")
+                raise Exception(f"Failed to load embedding model: {final_error}")
 
     def _get_best_device(self):
         """Get the best available device for PyTorch"""
