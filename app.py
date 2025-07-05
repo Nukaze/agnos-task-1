@@ -29,7 +29,11 @@ def main():
     if "rag_service" not in st.session_state:
         try:
             # Initialize Pinecone RAG service
+            print("Initializing TextEmbedder for RAG service...")
             embedder = TextEmbedder()
+            print("TextEmbedder initialized successfully")
+            
+            print("Initializing PineconeManager...")
             st.session_state.rag_service = PineconeManager(
                 api_key=st.secrets.get("PINECONE_API_KEY") or os.getenv("PINECONE_API_KEY"),
                 cloud=st.secrets.get("PINECONE_ENVIRONMENT_CLOUD") or os.getenv("PINECONE_ENVIRONMENT_CLOUD") or "aws",
@@ -71,9 +75,9 @@ def main():
             selected_model = "gemma3"  # Default fallback model
             st.warning("No models found. Using default model: gemma3")
         
-        # Debug info
-        st.sidebar.write(f"is dev: {st.session_state.is_dev}")
         if st.session_state.is_dev:
+            # Debug info
+            st.sidebar.write(f"is dev: {st.session_state.is_dev}")
             st.sidebar.write(f"Selected model: {selected_model}")
             st.sidebar.write(f"Available models: {len(ollama_models) if ollama_models else 0}")
         
@@ -120,15 +124,20 @@ def main():
     def get_relevant_context(query: str, k: int = 5) -> str:
         """Retrieve relevant context from vector database for RAG"""
         if not st.session_state.rag_service:
+            if st.session_state.is_dev:
+                st.sidebar.warning("RAG service not available - no context will be retrieved")
             return ""
         
         try:
             # Retrieve relevant documents
+            print(f"Retrieving context for query: {query[:50]}...")
             results = st.session_state.rag_service.retrieve(query, k=k)
             
-            print("rag result", results)
+            print(f"RAG retrieved {len(results) if results else 0} results")
             
             if not results:
+                if st.session_state.is_dev:
+                    st.sidebar.info("No relevant documents found")
                 return ""
             
             # Format context from retrieved documents - include content and sources
@@ -176,6 +185,9 @@ def main():
             return context
             
         except Exception as e:
+            print(f"Error in get_relevant_context: {str(e)}")
+            import traceback
+            traceback.print_exc()
             if st.session_state.is_dev:
                 st.sidebar.error(f"Error retrieving context: {str(e)}")
             return ""
