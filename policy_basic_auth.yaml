@@ -1,0 +1,8 @@
+
+on_http_request:
+  - actions:
+      - type: basic-auth
+        config:
+          realm: "Ollama Access"
+          credentials:
+            - administrator:534504f02f4b48c755fe22936e4e0db8d900adb4929449831db267f0307e6d39

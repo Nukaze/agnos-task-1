@@ -1,5 +1,13 @@
 streamlit
 crawl4ai
-langchain-milvus
+pinecone-client
+langchain-pinecone
 langchain-community
-sentence-transformers>=2.2.0   # BGM-M3 via Huggingface
+sentence-transformers>=2.2.0   # BGE-M3 via Huggingface
+torch>=2.6.0
+torchvision>=0.21.0
+requests
+python-dotenv
+
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+# torch-2.4.1+cu124 torchvision-0.19.1+cu124
