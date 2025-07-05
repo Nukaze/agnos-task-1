@@ -2,22 +2,20 @@
 import uuid
 from langchain_community.embeddings import SentenceTransformerEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_milvus import Milvus
 from langchain.schema import Document
-from pymilvus import MilvusClient
 import streamlit as st
 import os, re
 import torch
 from pinecone import Pinecone, ServerlessSpec
 
 def get_system_prompt():
-    return """You are a highly knowledgeable, professional medical assistant AI (Agnos Assistant), Your character based from Thais women. using Retrieval-Augmented Generation (RAG) based on Thailand.
+    return """You are a highly knowledgeable, professional medical assistant AI (Agnos Assistant), Your character is women. using Retrieval-Augmented Generation (RAG) based on Thailand.
 
 When a user/patient asks a question or describes symptoms, perform the following:
 
-1. **Retrieve** authoritative medical documents (e.g., clinical guidelines, PubMed abstracts, reputable health websites).
+1. **Retrieve** authoritative medical documents (e.g., clinical guidelines, reputable health websites).
 2. **Ground** your response in these documents—only include information explicitly supported by citations.
-3. **Summarize** the user's concern **in Thai**.
+3. **Summarize** must response **in Thai**.
 4. **Explain** in clear and compassionate Thai; if have any medical/technical terms in English.
 5. **Indicate** when evidence is uncertain or insufficient.
 6. **Ask follow‑up questions** if more context is needed (e.g., onset, duration, severity, history).
@@ -26,7 +24,7 @@ When a user/patient asks a question or describes symptoms, perform the following
    "ควรติดต่อแพทย์หรือโทรหาฉุกเฉินทันที (call emergency services)."
 
 **Formatting:**
-- If the topic or technical is needed, Include **citations** like (Source: [Title], [Year]) or numerical footnotes if the topic is needed.
+- If the topic or technical is needed, Include **citations** like (Source forum url: [Title], [Year]) or numerical footnotes if the topic is needed.
 - If the topic or technical is needed, Briefly mention retrieval source (e.g., "ข้อมูลจาก Agnos Health, Bangkok Hospital, etc,...").
 - If the topic or technical is needed, reference and can't find any supporting documents found: say **"ไม่พบหลักฐานจากเอกสารที่ดึงมา"**.
 
@@ -65,18 +63,66 @@ def sanitize_filename(filename: str) -> str:
 
 class TextEmbedder:
     def __init__(self, model_name: str = "BAAI/bge-m3"):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        # Better CUDA detection
+        self.device = self._get_best_device()
         print(f"Using device: {self.device}")
-        self.model = SentenceTransformerEmbeddings(
-            model_name=model_name, 
-            model_kwargs={"device": self.device},
-            encode_kwargs={
-                "normalize_embeddings": True, 
-                "convert_to_tensor": True
-            }
-        )
         
-        print(f"Model {model_name} loaded successfully.")
+        # Initialize model with proper device handling
+        try:
+            self.model = SentenceTransformerEmbeddings(
+                model_name=model_name, 
+                model_kwargs={
+                    "device": self.device,
+                    "trust_remote_code": True
+                },
+                encode_kwargs={
+                    "normalize_embeddings": True, 
+                    "convert_to_tensor": True,
+                    "device": self.device
+                }
+            )
+            print(f"Model {model_name} loaded successfully on {self.device}.")
+        except Exception as e:
+            print(f"Error loading model on {self.device}: {e}")
+            # Fallback to CPU
+            self.device = "cpu"
+            print(f"Falling back to CPU...")
+            self.model = SentenceTransformerEmbeddings(
+                model_name=model_name, 
+                model_kwargs={
+                    "device": "cpu",
+                    "trust_remote_code": True
+                },
+                encode_kwargs={
+                    "normalize_embeddings": True, 
+                    "convert_to_tensor": True,
+                    "device": "cpu"
+                }
+            )
+            print(f"Model {model_name} loaded successfully on CPU.")
+
+    def _get_best_device(self):
+        """Get the best available device for PyTorch"""
+        try:
+            import torch
+            
+            # Check if CUDA is available and working
+            if torch.cuda.is_available():
+                # Test CUDA functionality
+                try:
+                    test_tensor = torch.tensor([1.0], device="cuda")
+                    print(f"CUDA is available and working. Found {torch.cuda.device_count()} GPU(s)")
+                    print(f"GPU: {torch.cuda.get_device_name(0)}")
+                    return "cuda"
+                except Exception as e:
+                    print(f"CUDA test failed: {e}")
+                    return "cpu"
+            else:
+                print("CUDA is not available")
+                return "cpu"
+        except ImportError:
+            print("PyTorch not available")
+            return "cpu"
 
     def embed_text(self, text: str) -> list[float]:
         try:
