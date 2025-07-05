@@ -1,7 +1,9 @@
+import os
 import streamlit as st
 from ollama_client import OllamaClient
 import time
 import utils
+from utils import PineconeManager, TextEmbedder
 
 
 def main():
@@ -17,14 +19,38 @@ def main():
     
     st.title("Agnos Health LLM by Nukaze")
     
+    if "is_dev" not in st.session_state:
+        st.session_state.is_dev = st.secrets.get("is_dev", False)
+        
     if "ollama_client" not in st.session_state:
         st.session_state.ollama_client = OllamaClient()
     
+    # Initialize RAG service for vector search
+    if "rag_service" not in st.session_state:
+        try:
+            # Initialize Pinecone RAG service
+            embedder = TextEmbedder()
+            st.session_state.rag_service = PineconeManager(
+                api_key=st.secrets.get("PINECONE_API_KEY") or os.getenv("PINECONE_API_KEY"),
+                cloud=st.secrets.get("PINECONE_ENVIRONMENT_CLOUD") or os.getenv("PINECONE_ENVIRONMENT_CLOUD") or "aws",
+                region=st.secrets.get("PINECONE_ENVIRONMENT_REGION") or os.getenv("PINECONE_ENVIRONMENT_REGION"),
+                index_name=st.secrets.get("PINECONE_INDEX_NAME"),
+                embedder=embedder,
+                dimension=1024,
+            )
+            print("RAG service initialized successfully")
+            
+            if st.session_state.is_dev:
+                st.sidebar.success("RAG service initialized successfully")
+        except Exception as e:
+            print(f"Failed to initialize RAG service: {str(e)}")
+            st.session_state.rag_service = None
+            if st.session_state.is_dev:
+                st.sidebar.error(f"Failed to initialize RAG service: {str(e)}")
+    
     if "history_messages" not in st.session_state:
         st.session_state.history_messages = []
-    
-    if "count" not in st.session_state:
-        st.session_state.count = 0
+
         
     # Sidebar for settings
     with st.sidebar:
@@ -42,12 +68,14 @@ def main():
                 index=3
             )
         else:
-            selected_model = "llama2"  # Default fallback model
-            st.warning("No models found. Using default model: llama2")
+            selected_model = "gemma3"  # Default fallback model
+            st.warning("No models found. Using default model: gemma3")
         
         # Debug info
-        st.sidebar.write(f"Selected model: {selected_model}")
-        st.sidebar.write(f"Available models: {len(ollama_models) if ollama_models else 0}")
+        st.sidebar.write(f"is dev: {st.session_state.is_dev}")
+        if st.session_state.is_dev:
+            st.sidebar.write(f"Selected model: {selected_model}")
+            st.sidebar.write(f"Available models: {len(ollama_models) if ollama_models else 0}")
         
         temperature = st.slider(
             "Temperature",
@@ -72,12 +100,84 @@ def main():
             st.session_state.count = 0
             st.success("Chat history has been reset.")
         
-        # Debug: Show conversation history length
-        st.sidebar.write(f"Chat history length: {len(st.session_state.history_messages)}")
+        if st.session_state.is_dev:
+            # Debug: Show conversation history length
+            st.sidebar.write(f"Chat history length: {len(st.session_state.history_messages)}")
         
-        # Add option to use simple prompt vs conversation
-        use_conversation = st.sidebar.checkbox("Use Conversation History", value=True, help="Enable to use full conversation history, disable for single prompt")
+        # RAG Settings
+        st.sidebar.header("RAG Settings")
+        use_rag = st.sidebar.checkbox("Enable RAG (Vector Search)", value=True, help="Enable to search vector database for relevant context")
+        rag_k = st.sidebar.slider("Number of context documents", min_value=1, max_value=10, value=5, help="Number of relevant documents to retrieve")
+        
+        # Show RAG status
+        if st.session_state.rag_service:
+            st.sidebar.success("✅ RAG Service: Connected")
+        else:
+            st.sidebar.error("❌ RAG Service: Not Available")
+            use_rag = False
     
+    # Helper function to retrieve relevant context from vector database
+    def get_relevant_context(query: str, k: int = 5) -> str:
+        """Retrieve relevant context from vector database for RAG"""
+        if not st.session_state.rag_service:
+            return ""
+        
+        try:
+            # Retrieve relevant documents
+            results = st.session_state.rag_service.retrieve(query, k=k)
+            
+            print("rag result", results)
+            
+            if not results:
+                return ""
+            
+            # Format context from retrieved documents
+            context_parts = []
+            for i, result in enumerate(results, 1):
+                content = result.metadata.get('content', '') if hasattr(result, 'metadata') else str(result)
+                source = result.metadata.get('source', 'Unknown') if hasattr(result, 'metadata') else 'Unknown'
+                context_parts.append(f"[{i}] {content}\n(Source: {source})")
+            
+            context = "\n\n".join(context_parts)
+            
+            if st.session_state.is_dev:
+                st.sidebar.write(f"Debug: Retrieved {len(results)} relevant documents")
+                st.sidebar.write(f"Debug: Context length: {len(context)} characters")
+            
+            return context
+            
+        except Exception as e:
+            if st.session_state.is_dev:
+                st.sidebar.error(f"Error retrieving context: {str(e)}")
+            return ""
+
+    # Helper function to handle streaming response display
+    def display_streaming_response(response_stream, message_placeholder):
+        """Display streaming response and return full response text"""
+        full_response = ""
+        response_received = False
+        
+        for chunk in response_stream:
+            response_received = True
+            if chunk.startswith("Error:"):
+                st.error(chunk)
+                st.sidebar.error(f"Ollama Error: {chunk}")
+                return chunk  # Return error message
+            else:
+                full_response += chunk
+                # Update the message in real-time
+                message_placeholder.markdown(full_response + "▌")
+        
+        if not response_received:
+            error_msg = "No response received from Ollama"
+            st.error(error_msg)
+            st.sidebar.error(error_msg)
+            return f"Error: {error_msg}"
+        
+        # Final update without cursor
+        message_placeholder.markdown(full_response)
+        return full_response
+
     # main chat interface
     for message in st.session_state.history_messages:    
         with st.chat_message(message["role"]):
@@ -90,102 +190,58 @@ def main():
         
         # Loading indicator and streaming response
         with st.spinner("Thinking..."):
-            response_placeholder = st.empty()
-            
             # Create assistant message container
             with st.chat_message(ASSISTANT):
                 message_placeholder = st.empty()
                 
                 # Get streaming response from Ollama
-                full_response = ""
                 try:
                     # Debug: Show what we're sending
-                    st.sidebar.write(f"Debug: Model: {selected_model}")
-                    st.sidebar.write(f"Debug: Use conversation: {use_conversation}")
+                    if st.session_state.is_dev:
+                        st.sidebar.write(f"Debug: Model: {selected_model}")
                     
-                    if use_conversation and len(st.session_state.history_messages) > 0:
-                        # Use conversation history mode
-                        try:
-                            # Prepare conversation history for the model
-                            # Use last 20 messages to avoid token limits
-                            recent_messages_limit = 20
-                            conversation_history = st.session_state.history_messages[-recent_messages_limit:]
-                            
-                            # Add current user message to history
-                            conversation_history.append({"role": "user", "content": user_prompt})
-                            
-                            # Debug: Show what we're sending
+                    # Retrieve relevant context using RAG if enabled
+                    context = ""
+                    if use_rag and st.session_state.rag_service:
+                        if st.session_state.is_dev:
+                            st.sidebar.write("Debug: Retrieving relevant context...")
+                        context = get_relevant_context(user_prompt, k=rag_k)
+                    
+                    # Use conversation history mode
+                    try:
+                        # Prepare conversation history for the model (last 20 messages)
+                        recent_messages_limit = 20
+                        conversation_history = st.session_state.history_messages[-recent_messages_limit:]
+                        
+                        # Add current user message to history
+                        conversation_history.append({"role": "user", "content": user_prompt})
+                        
+                        if st.session_state.is_dev:
                             st.sidebar.write(f"Debug: Sending {len(conversation_history)} messages")
-                            
-                            # Generate streaming response with full conversation history
-                            # Pass conversation_history as a list - generate_response will detect it automatically
-                            response_stream = st.session_state.ollama_client.generate_response(
-                                model=selected_model,
-                                prompt=conversation_history,  # Pass as list for conversation mode
-                                system_prompt=system_prompt,
-                                temperature=temperature,
-                                stream=True
-                            )
-                            
-                            # Display streaming response
-                            response_received = False
-                            for chunk in response_stream:
-                                response_received = True
-                                if chunk.startswith("Error:"):
-                                    st.error(chunk)
-                                    st.sidebar.error(f"Ollama Error: {chunk}")
-                                    break
-                                else:
-                                    full_response += chunk
-                                    # Update the message in real-time
-                                    message_placeholder.markdown(full_response + "▌")
-                            
-                            if not response_received:
-                                st.sidebar.warning("Conversation mode failed, trying simple prompt...")
-                                raise Exception("No response from conversation mode")
-                                
-                        except Exception as conv_error:
-                            st.sidebar.warning(f"Conversation mode failed: {str(conv_error)}")
-                            # Fallback to simple prompt mode
-                            use_conversation = False
-                    
-                    if not use_conversation or len(st.session_state.history_messages) == 0:
-                        # Use simple prompt mode (fallback or first message)
-                        st.sidebar.write("Debug: Using simple prompt mode")
                         
-                        # Build simple prompt with system prompt
-                        simple_prompt = f"{system_prompt}\n\nUser: {user_prompt}\nAssistant: "
+                        # Add context to the system prompt if RAG is enabled and context is found
+                        enhanced_system_prompt = system_prompt
+                        if context:
+                            enhanced_system_prompt = f"{system_prompt}\n\n**Relevant Context from Medical Database:**\n{context}\n\nPlease use this context to provide accurate, evidence-based responses."
+                            if st.session_state.is_dev:
+                                st.sidebar.write(f"Debug: Enhanced system prompt with {len(context)} chars of context")
                         
-                        # Generate streaming response with simple prompt
-                        # Pass simple_prompt as a string - generate_response will detect it automatically
+                        # Generate streaming response with conversation history
                         response_stream = st.session_state.ollama_client.generate_response(
                             model=selected_model,
-                            prompt=simple_prompt,  # Pass as string for simple prompt mode
-                            system_prompt=None,  # Already included in prompt
+                            prompt=conversation_history,  # Pass as list for conversation mode
+                            system_prompt=enhanced_system_prompt,
                             temperature=temperature,
                             stream=True
                         )
                         
-                        # Display streaming response
-                        response_received = False
-                        for chunk in response_stream:
-                            response_received = True
-                            if chunk.startswith("Error:"):
-                                st.error(chunk)
-                                st.sidebar.error(f"Ollama Error: {chunk}")
-                                break
-                            else:
-                                full_response += chunk
-                                # Update the message in real-time
-                                message_placeholder.markdown(full_response + "▌")
+                        full_response = display_streaming_response(response_stream, message_placeholder)
                         
-                        if not response_received:
-                            st.error("No response received from Ollama")
-                            st.sidebar.error("No response received from Ollama")
-                            full_response = "Error: No response received from Ollama"
-                    
-                    # Final update without cursor
-                    message_placeholder.markdown(full_response)
+                    except Exception as conv_error:
+                        if st.session_state.is_dev:
+                            st.sidebar.warning(f"Conversation mode failed: {str(conv_error)}")
+                        # Fallback to simple prompt mode
+                        raise Exception("Conversation mode failed, using simple prompt")
                     
                     # Add to chat history
                     st.session_state.history_messages.append({"role": ASSISTANT, "content": full_response})
@@ -193,7 +249,8 @@ def main():
                 except Exception as e:
                     error_message = f"Error generating response: {str(e)}"
                     st.error(error_message)
-                    st.sidebar.error(f"Exception: {error_message}")
+                    if st.session_state.is_dev:
+                        st.sidebar.error(f"Exception: {error_message}")
                     st.session_state.history_messages.append({"role": ASSISTANT, "content": error_message})
 
 if __name__ == "__main__":
