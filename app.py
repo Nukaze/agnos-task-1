@@ -131,18 +131,47 @@ def main():
             if not results:
                 return ""
             
-            # Format context from retrieved documents
+            # Format context from retrieved documents - include content and sources
             context_parts = []
             for i, result in enumerate(results, 1):
-                content = result.metadata.get('content', '') if hasattr(result, 'metadata') else str(result)
+                # Extract source URL and metadata
                 source = result.metadata.get('source', 'Unknown') if hasattr(result, 'metadata') else 'Unknown'
-                context_parts.append(f"[{i}] {content}\n(Source: {source})")
+                timestamp = result.metadata.get('forum_posted_timestamp', '') if hasattr(result, 'metadata') else ''
+                reply_count = result.metadata.get('forum_reply_count', '') if hasattr(result, 'metadata') else ''
+                
+                # Try to get content from different possible locations
+                content = ""
+                if hasattr(result, 'metadata') and result.metadata:
+                    # First try to get content from metadata (where we store it)
+                    content = result.metadata.get('content', '')
+                elif hasattr(result, 'page_content'):
+                    content = result.page_content
+                elif hasattr(result, 'content'):
+                    content = result.content
+                
+                print(f"\n[DEBUG] Content for result {i}: {content[:200]}...\n")
+                print(f"[source]: [{source}]")
+                
+                # Create context part with content and metadata
+                context_part = f"[{i}] Source: {source}"
+                
+                # Add metadata info
+                if timestamp:
+                    context_part += f" (Posted Date: {timestamp})"
+                if reply_count:
+                    context_part += f" (Replies: {reply_count})"
+
+                
+                context_parts.append(context_part)
             
             context = "\n\n".join(context_parts)
             
             if st.session_state.is_dev:
                 st.sidebar.write(f"Debug: Retrieved {len(results)} relevant documents")
                 st.sidebar.write(f"Debug: Context length: {len(context)} characters")
+                # Log only sources for debugging
+                sources_only = [result.metadata.get('source', 'Unknown') if hasattr(result, 'metadata') else 'Unknown' for result in results]
+                st.sidebar.write(f"Debug: Sources found: {sources_only}")
             
             return context
             
