@@ -252,7 +252,7 @@ def main():
                         if st.session_state.is_dev:
                             st.sidebar.write("Debug: Retrieving relevant context...")
                         context = get_relevant_context(user_prompt, k=rag_k)
-                    
+                        
                     # Use conversation history mode
                     try:
                         # Prepare conversation history for the model (last 20 messages)
@@ -264,6 +264,7 @@ def main():
                         
                         if st.session_state.is_dev:
                             st.sidebar.write(f"Debug: Sending {len(conversation_history)} messages")
+
                         
                         # Add context to the system prompt if RAG is enabled and context is found
                         enhanced_system_prompt = system_prompt
@@ -271,18 +272,26 @@ def main():
                             enhanced_system_prompt = f"{system_prompt}\n\n**Relevant Context from Agnos Medical Database:**\n{context}\n\nPlease use this context to provide source url accurate, evidence-based responses."
                             if st.session_state.is_dev:
                                 st.sidebar.write(f"Debug: Enhanced system prompt with {len(context)} chars of context")
+                    
+                    
+                        is_single_prompt_mode = st.session_state.use_single_prompt_mode.lower() != False
+                        print("single prompt mode", type(is_single_prompt_mode))
                         
+                        final_prompt = [conversation_history, user_prompt][is_single_prompt_mode]
+                        print("type of prompt", type(final_prompt))
+                        print('\n')
                         
                         # Generate streaming response with conversation history
                         response_stream = st.session_state.ollama_client.generate_response(
                             model=selected_model,
-                            prompt=[conversation_history, user_prompt][st.session_state.use_single_prompt_mode],  # Pass as list for conversation mode
+                            prompt=final_prompt,  # Pass as list for conversation mode
                             system_prompt=enhanced_system_prompt,
                             temperature=temperature,
                             stream=True
                         )
                         
                         full_response = display_streaming_response(response_stream, message_placeholder)
+                        
                         
                     except Exception as conv_error:
                         if st.session_state.is_dev:
