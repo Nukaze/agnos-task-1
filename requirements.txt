@@ -1,6 +1,6 @@
 streamlit
 crawl4ai
-pinecone-client
+pinecone
 langchain-pinecone
 langchain-community
 sentence-transformers>=2.2.0   # BGE-M3 via Huggingface
