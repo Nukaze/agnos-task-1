@@ -24,6 +24,11 @@ def main():
         
     if "ollama_client" not in st.session_state:
         st.session_state.ollama_client = OllamaClient()
+        
+    if "use_single_prompt_mode" not in st.session_state:
+        st.session_state.use_single_prompt_mode = st.secrets.get("USE_SINGLE_PROMPT_MODE", False)
+    
+    print("use single prompt:", st.session_state.use_single_prompt_mode)
     
     # Initialize RAG service for vector search
     if "rag_service" not in st.session_state:
@@ -267,10 +272,11 @@ def main():
                             if st.session_state.is_dev:
                                 st.sidebar.write(f"Debug: Enhanced system prompt with {len(context)} chars of context")
                         
+                        
                         # Generate streaming response with conversation history
                         response_stream = st.session_state.ollama_client.generate_response(
                             model=selected_model,
-                            prompt=conversation_history,  # Pass as list for conversation mode
+                            prompt=[conversation_history, user_prompt][st.session_state.use_single_prompt_mode],  # Pass as list for conversation mode
                             system_prompt=enhanced_system_prompt,
                             temperature=temperature,
                             stream=True
