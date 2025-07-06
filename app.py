@@ -16,9 +16,7 @@ def main():
         เช่น https://www.agnoshealth.com/forums/%E0%B8%9B%E0%B8%A7%E0%B8%94%E0%B8%97%E0%B9%89%E0%B8%AD%E0%B8%87%E0%B8%9B%E0%B8%A3%E0%B8%B0%E0%B8%88%E0%B8%B3%E0%B9%80%E0%B8%94%E0%B8%B7%E0%B8%AD%E0%B8%99/1916 [Header ใช้ Next.js + CloudFront/Edge]
         Scenario: เข้าลิงก์ผ่าน UI ได้, แต่หาก refresh (GET ตรง) หน้ากระทู้นั้นๆ จะเกิด error 500 Internal Server Error จึงไม่สามารถ scrape ข้อมูลออกมาได้ไม่มากเพียงพอกับการทำ RAG ดังนั้น accuracy จะไม่ได้แม่นยำเท่าที่ควรครับผม 
         """)
-        if st.button("Close"):
-            st.session_state.notice_shown = True
-            st.rerun()
+        st.session_state.notice_shown = True
 
     # Show the dialog only once per session
     if "notice_shown" not in st.session_state:
