@@ -38,7 +38,7 @@ Assistant:
   5. สรุปสั้นๆ
   6. ถามติดตามหรือให้คำแนะนำเพิ่มเติม
 
-Always prioritize patient safety, clarity, and evidence-based care.
+Always prioritize patient safety, concise, clarity, and evidence-based care.
 """
 
 
