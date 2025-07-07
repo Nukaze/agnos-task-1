@@ -116,7 +116,7 @@ def main():
             "System Prompt",
             value=utils.get_system_prompt(),
             height=200,
-            max_chars=500,
+            max_chars=2000,
             help="A system prompt to guide the AI's behavior. This is a good place to set the tone and style of the responses."
         )
         
