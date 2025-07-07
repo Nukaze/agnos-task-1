@@ -253,7 +253,7 @@ def main():
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
     
-    if user_prompt := st.chat_input("Enter your message"):
+    if user_prompt := st.chat_input("ใส่ข้อความอาการ หรือปัญหาสุขภาพที่อยากปรึกษาตรงนี้ได้เลย"):
         # Display user message
         st.chat_message(USER).markdown(user_prompt)
         st.session_state.history_messages.append({"role": USER, "content": user_prompt})
