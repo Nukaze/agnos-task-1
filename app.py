@@ -41,9 +41,11 @@ def main():
         st.session_state.ollama_client = OllamaClient()
         
     if "use_single_prompt_mode" not in st.session_state:
-        st.session_state.use_single_prompt_mode = st.secrets.get("USE_SINGLE_PROMPT_MODE", False)
+        use_single_prompt_mode = st.secrets.get("USE_SINGLE_PROMPT_MODE", False)
+        st.session_state.use_single_prompt_mode = use_single_prompt_mode != False
     
     print("use single prompt:", st.session_state.use_single_prompt_mode)
+
     
     # Initialize RAG service for vector search
     if "rag_service" not in st.session_state:
@@ -131,7 +133,14 @@ def main():
         # RAG Settings
         st.sidebar.header("RAG Settings")
         use_rag = st.sidebar.checkbox("Enable RAG (Vector Search)", value=True, help="Enable to search vector database for relevant context")
-        rag_k = st.sidebar.slider("Number of context documents", min_value=1, max_value=10, value=5, help="Number of relevant documents to retrieve")
+        rag_k = st.sidebar.slider(
+            "Number of context documents", 
+            min_value=1, 
+            max_value=10, 
+            value=5, 
+            help="Number of relevant documents to retrieve"
+        )
+        print("rag top_k:", rag_k)
         
         # Show RAG status
         if st.session_state.rag_service:
@@ -267,6 +276,7 @@ def main():
                         if st.session_state.is_dev:
                             st.sidebar.write("Debug: Retrieving relevant context...")
                         context = get_relevant_context(user_prompt, k=rag_k)
+                        print("use rag top_k:", rag_k)
                         
                     # Use conversation history mode
                     try:
@@ -289,10 +299,10 @@ def main():
                                 st.sidebar.write(f"Debug: Enhanced system prompt with {len(context)} chars of context")
                     
                     
-                        is_single_prompt_mode = st.session_state.use_single_prompt_mode.lower() != False
-                        print("single prompt mode", type(is_single_prompt_mode))
+                        print("single prompt mode", st.session_state.use_single_prompt_mode)
+
                         
-                        final_prompt = [conversation_history, user_prompt][is_single_prompt_mode]
+                        final_prompt = [conversation_history, user_prompt][st.session_state.use_single_prompt_mode]
                         print("type of prompt", type(final_prompt))
                         print('\n')
                         
@@ -305,8 +315,8 @@ def main():
                             stream=True
                         )
                         
+                        print("\n..generating response..\n")
                         full_response = display_streaming_response(response_stream, message_placeholder)
-                        
                         
                     except Exception as conv_error:
                         if st.session_state.is_dev:
@@ -316,6 +326,9 @@ def main():
                     
                     # Add to chat history
                     st.session_state.history_messages.append({"role": ASSISTANT, "content": full_response})
+                    print("\nfull response generated.")
+                    print("#"*64)
+                    print()
                     
                 except Exception as e:
                     error_message = f"Error generating response: {str(e)}"
