@@ -68,27 +68,19 @@ class TextEmbedder:
         print(f"Using device: {self.device}")
         try:
             self.model = SentenceTransformer(model_name, device=self.device)
-            print(f"Model {model_name} loaded successfully on {self.device}.")
+            print(f"Model [{model_name}] loaded successfully on [{self.device}].")
         except Exception as e:
             print(f"Error loading embedding model {model_name}: {e}")
             self.model = None
-
+        print("-"*64)
+        
     def _get_best_device(self):
         """Get the best available device for PyTorch"""
         try:
             import torch
-            
             # Check if CUDA is available and working
             if torch.cuda.is_available():
-                # Test CUDA functionality
-                try:
-                    test_tensor = torch.tensor([1.0], device="cuda")
-                    print(f"CUDA is available and working. Found {torch.cuda.device_count()} GPU(s)")
-                    print(f"GPU: {torch.cuda.get_device_name(0)}")
-                    return "cuda"
-                except Exception as e:
-                    print(f"CUDA test failed: {e}")
-                    return "cpu"
+                return "cuda"
             else:
                 print("CUDA is not available")
                 return "cpu"
@@ -98,14 +90,18 @@ class TextEmbedder:
 
     def embed_text(self, text: str) -> list[float]:
         try:
+            if self.model is None:
+                print("[warning] Embedding model is not loaded. Cannot embed text.")
+                return []
             if not text or not text.strip():
                 print("Warning: Empty text provided for embedding")
                 return []
-            result = self.model.encode(text, normalize_embeddings=True).tolist()
-            if not result:
+            embeddings = self.model.encode([text], normalize_embeddings=True).tolist()
+            embedding_vector = embeddings[0]
+            if not embedding_vector:
                 print("Warning: Empty embedding result")
                 return []
-            return result
+            return embedding_vector
         except Exception as e:
             print(f"Error embedding text: {e}")
             # Try to provide a fallback embedding (zeros)
