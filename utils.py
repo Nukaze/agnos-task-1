@@ -1,12 +1,12 @@
 # utils.py
 import uuid
-from langchain_community.embeddings import SentenceTransformerEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 import streamlit as st
 import os, re
 import torch
 from pinecone import Pinecone, ServerlessSpec
+from sentence_transformers import SentenceTransformer
 
 def get_system_prompt():
     return """You are a highly knowledgeable, professional medical assistant AI (AGNOS Assistant), Your character is women. using Retrieval-Augmented Generation (RAG) based on Thailand.
@@ -66,40 +66,12 @@ class TextEmbedder:
         # Better CUDA detection
         self.device = self._get_best_device()
         print(f"Using device: {self.device}")
-        
-        # Initialize model with proper device handling
         try:
-            # Use minimal settings to avoid meta tensor problems
-            self.model = SentenceTransformerEmbeddings(
-                model_name=model_name, 
-                model_kwargs={
-                    "trust_remote_code": True,
-                    "device": self.device,
-                },
-                encode_kwargs={
-                    "normalize_embeddings": True,
-                }
-            )
-            print(f"Model {model_name} loaded successfully on CPU.")
-            
+            self.model = SentenceTransformer(model_name, device=self.device)
+            print(f"Model {model_name} loaded successfully on {self.device}.")
         except Exception as e:
-            print(f"Error loading model: {e}")
-            # Last resort: try with even more minimal settings
-            try:
-                print("Trying with minimal settings...")
-                self.model = SentenceTransformerEmbeddings(
-                    model_name=model_name,
-                    model_kwargs={
-                        "trust_remote_code": True
-                    },
-                    encode_kwargs={
-                        "normalize_embeddings": True
-                    }
-                )
-                print(f"Model {model_name} loaded with minimal settings.")
-            except Exception as final_error:
-                print(f"Critical error loading model: {final_error}")
-                raise Exception(f"Failed to load embedding model: {final_error}")
+            print(f"Error loading embedding model {model_name}: {e}")
+            self.model = None
 
     def _get_best_device(self):
         """Get the best available device for PyTorch"""
@@ -129,22 +101,16 @@ class TextEmbedder:
             if not text or not text.strip():
                 print("Warning: Empty text provided for embedding")
                 return []
-            
-            result = self.model.embed_query(text)
+            result = self.model.encode(text, normalize_embeddings=True).tolist()
             if not result:
                 print("Warning: Empty embedding result")
                 return []
-            
             return result
         except Exception as e:
             print(f"Error embedding text: {e}")
             # Try to provide a fallback embedding (zeros)
             try:
-                # Get embedding dimension from model
-                if hasattr(self.model, 'client') and hasattr(self.model.client, 'get_sentence_embedding_dimension'):
-                    dim = self.model.client.get_sentence_embedding_dimension()
-                else:
-                    dim = 1024  # Default dimension for BGE-M3
+                dim = self.model.get_sentence_embedding_dimension() if self.model else 1024
                 return [0.0] * dim
             except:
                 return []
@@ -154,27 +120,19 @@ class TextEmbedder:
             if not documents:
                 print("Warning: Empty documents list provided for embedding")
                 return []
-            
-            # Filter out empty documents
             valid_docs = [doc for doc in documents if doc and doc.strip()]
             if not valid_docs:
                 print("Warning: No valid documents to embed")
                 return []
-            
-            result = self.model.embed_documents(valid_docs)
-            if not result:
+            result = self.model.encode(valid_docs, normalize_embeddings=True)
+            if result is None or len(result) == 0:
                 print("Warning: Empty embedding results")
                 return []
-            
-            return result
+            return result.tolist() if hasattr(result, 'tolist') else result
         except Exception as e:
             print(f"Error embedding documents: {e}")
-            # Try to provide fallback embeddings
             try:
-                if hasattr(self.model, 'client') and hasattr(self.model.client, 'get_sentence_embedding_dimension'):
-                    dim = self.model.client.get_sentence_embedding_dimension()
-                else:
-                    dim = 1024
+                dim = self.model.get_sentence_embedding_dimension() if self.model else 1024
                 return [[0.0] * dim for _ in documents]
             except:
                 return []
